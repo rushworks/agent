@@ -256,7 +256,8 @@ Description=Refresh egress allowlist for RushworksAI agent ($NAME) (tracks CDN I
 
 [Timer]
 OnBootSec=2min
-OnUnitActiveSec=15min
+OnCalendar=*:0/15
+Persistent=true
 
 [Install]
 WantedBy=timers.target
@@ -280,7 +281,7 @@ systemctl enable "rushworks-agent-$NAME"        >/dev/null 2>&1 || true
 
 # Apply the egress allowlist now (idempotent) and start the timer.
 systemctl restart rushworks-egress-$NAME.service
-systemctl start   rushworks-egress-$NAME.timer
+systemctl restart rushworks-egress-$NAME.timer
 
 if [ "$changed" -eq 1 ] || ! systemctl is-active --quiet "rushworks-agent-$NAME"; then
   systemctl restart "rushworks-agent-$NAME"
