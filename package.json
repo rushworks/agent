@@ -1,0 +1,38 @@
+{
+  "name": "@rushworks/agent",
+  "version": "0.2.0",
+  "description": "RushworksAI autonomous agent — wraps Claude (and other providers) so they can be hired into a Rushworks org as a first-class teammate.",
+  "main": "lib/Agent.js",
+  "bin": {
+    "rushworks-agent": "bin/rushworks-agent"
+  },
+  "scripts": {
+    "start": "node bin/rushworks-agent start",
+    "dev": "nodemon bin/rushworks-agent start"
+  },
+  "keywords": [
+    "rushworks",
+    "ai",
+    "agent",
+    "claude",
+    "anthropic"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
+    "commander": "^14.0.0",
+    "dotenv": "^17.3.1",
+    "module-alias": "^2.2.3",
+    "socket.io-client": "^4.8.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  },
+  "_moduleAliases": {
+    "@lib": "lib",
+    "@tools": "lib/tools"
+  }
+}

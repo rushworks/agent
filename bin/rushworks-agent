@@ -1,0 +1,213 @@
+#!/usr/bin/env node
+"use strict";
+
+require('dotenv').config();
+require('module-alias/register');
+
+const readline = require('readline');
+const { program } = require('commander');
+const log = require('@lib/Log');
+const Config = require('@lib/Config');
+const Agent = require('@lib/Agent');
+
+const pkg = require('../package.json');
+
+program
+  .name('rushworks-agent')
+  .description('RushworksAI agent — wraps Claude (and other providers) as a Rushworks teammate.')
+  .version(pkg.version);
+
+// ─────────────────────────────────────────────────────────────────────
+// init — interactive setup
+//
+// Two modes:
+//   - Default: writes/updates ~/.rushworks/agent.json (the legacy
+//     single-agent-per-host setup).
+//   - --workspace <dir>: scaffolds a per-agent workspace directory
+//     with a chmod-600 .env file. Recommended for any host running
+//     more than one agent (analyst + developer side-by-side, etc.).
+//     The agent is then run by `cd <dir> && rushworks-agent start`,
+//     which causes dotenv to pick up the workspace .env, and env
+//     vars override the home config.
+// ─────────────────────────────────────────────────────────────────────
+program
+  .command('init')
+  .description('Run interactive setup: portal URL, agent token, model, working directory.')
+  .option('--workspace <dir>', 'Scaffold a per-agent workspace at <dir> (writes .env there instead of the home config).')
+  .action(async (opts) => {
+    const path = require('path');
+    const fs = require('fs');
+    const os = require('os');
+
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const ask = (q, def) => new Promise((res) => rl.question(def ? `${q} [${def}] ` : `${q} `, (a) => res(a.trim() || def)));
+
+    const existing = Config.loadConfig();
+    const workspaceMode = !!opts.workspace;
+    const workspaceDir = opts.workspace
+      ? path.resolve(opts.workspace.replace(/^~/, os.homedir()))
+      : null;
+
+    if (workspaceMode) {
+      console.log(`RushworksAI agent setup — workspace mode\nWorkspace: ${workspaceDir}\n`);
+    } else {
+      console.log('RushworksAI agent setup\n(use --workspace <dir> to scaffold a per-agent workspace instead of the home config)\n');
+    }
+
+    const cfg = { ...existing };
+
+    // Portal URL is a constant — every BYOA install points at the
+    // canonical Rushworks portal. Local dev can still override by
+    // setting RW_PORTAL_URL in the env before `rushworks-agent start`
+    // (dotenv-loaded values from a workspace .env take precedence
+    // over this constant at runtime via Config.resolveConfig).
+    cfg.portal_url = Config.PORTAL_URL_DEFAULT;
+
+    // Agent token: if the operator launched the installer with
+    // RW_AGENT_TOKEN baked into the env (the path the portal's
+    // copy-paste install command takes), use it without prompting.
+    // Otherwise fall back to the interactive prompt.
+    const envToken = (process.env.RW_AGENT_TOKEN || '').trim();
+    if (envToken) {
+      cfg.agent_token = envToken;
+      console.log(`Using agent token from environment (${envToken.slice(0, 10)}…)`);
+    } else {
+      cfg.agent_token = await ask('Agent token (rwsk_...):', existing.agent_token || '');
+    }
+
+    let identity = null;
+    try {
+      identity = await Config.verifyToken(cfg);
+      console.log(`✓ Token valid — connected as "${identity.display_name}" (id=${identity.id}, role=${identity.role})`);
+    } catch (err) {
+      console.error(`✗ Token verification failed: ${err.message}`);
+      rl.close();
+      process.exit(1);
+    }
+
+    // Provider, model, and working_directory all use sensible defaults so
+    // the only thing the operator types is the Anthropic API key
+    // (everything else either has a constant default or comes from the
+    // env via the portal-rendered install command). Customers can edit
+    // .env after init if they want a different model or to point
+    // working_directory at an existing repo.
+    cfg.provider = existing.provider || 'anthropic';
+    cfg.model = existing.model || 'claude-sonnet-4-6';
+    cfg.working_directory = workspaceMode
+      ? path.join(workspaceDir, 'work')
+      : (existing.working_directory || '');
+
+    console.log('');
+    console.log('Just one thing left — your Anthropic API key. Grab it from');
+    console.log('  https://console.anthropic.com/settings/keys');
+    cfg.anthropic_api_key = await ask('Anthropic API key (sk-ant-...):', existing.anthropic_api_key || '');
+
+    rl.close();
+
+    if (workspaceMode) {
+      // Scaffold the workspace dir + optional work/ subdir.
+      fs.mkdirSync(workspaceDir, { recursive: true, mode: 0o700 });
+      if (cfg.working_directory && cfg.working_directory.startsWith(workspaceDir)) {
+        fs.mkdirSync(cfg.working_directory, { recursive: true });
+      }
+      // Build the .env file content. Use uppercase RW_*/ANTHROPIC_API_KEY
+      // names — these match what dotenv + Config.resolveConfig() expect.
+      const envPath = path.join(workspaceDir, '.env');
+      const lines = [
+        `# ${identity.display_name} — ${identity.role} agent`,
+        `# Workspace generated by 'rushworks-agent init --workspace'`,
+        ``,
+        `RW_PORTAL_URL=${cfg.portal_url}`,
+        `RW_AGENT_TOKEN=${cfg.agent_token}`,
+        `ANTHROPIC_API_KEY=${cfg.anthropic_api_key}`,
+        `RW_MODEL=${cfg.model}`,
+        `RW_MAX_TOKENS=16384`,
+        ...(cfg.working_directory ? [`RW_WORKING_DIRECTORY=${cfg.working_directory}`] : []),
+        ``
+      ];
+      fs.writeFileSync(envPath, lines.join('\n'), { mode: 0o600 });
+      console.log(`\nWrote ${envPath} (chmod 600)`);
+      if (cfg.working_directory && cfg.working_directory.startsWith(workspaceDir)) {
+        console.log(`Created ${cfg.working_directory}`);
+      }
+      console.log(`\nStart the agent with:\n  cd ${workspaceDir}\n  rushworks-agent start`);
+    } else {
+      const where = Config.saveConfig(cfg);
+      console.log(`\nSaved config to ${where}`);
+      console.log('Start the agent with:  rushworks-agent start');
+    }
+  });
+
+// ─────────────────────────────────────────────────────────────────────
+// whoami — verify current config + identity against the portal
+// ─────────────────────────────────────────────────────────────────────
+program
+  .command('whoami')
+  .description('Print the agent identity the configured token resolves to.')
+  .action(async () => {
+    const cfg = Config.resolveConfig();
+    try {
+      const id = await Config.verifyToken(cfg);
+      console.log(JSON.stringify(id, null, 2));
+    } catch (err) {
+      console.error(err.message);
+      process.exit(1);
+    }
+  });
+
+// ─────────────────────────────────────────────────────────────────────
+// start — run the agent
+// ─────────────────────────────────────────────────────────────────────
+program
+  .command('start')
+  .description('Run the agent: connect, subscribe to events, work tasks as assigned.')
+  .action(async () => {
+    const cfg = Config.resolveConfig();
+    if (!cfg.portal_url || !cfg.agent_token || !cfg.anthropic_api_key) {
+      console.error('Missing required config. Run `rushworks-agent init` first or set env vars (RW_PORTAL_URL, RW_AGENT_TOKEN, ANTHROPIC_API_KEY).');
+      process.exit(1);
+    }
+
+    try {
+      await Config.verifyToken(cfg);
+    } catch (err) {
+      console.error(`Token verification failed: ${err.message}`);
+      process.exit(1);
+    }
+
+    log.info(`portal=${cfg.portal_url}  model=${cfg.model}  wd=${cfg.working_directory || '(none)'}`);
+    const agent = new Agent(cfg);
+
+    const stop = () => { try { agent.stop(); } catch (_) {} process.exit(0); };
+    process.on('SIGINT',  stop);
+    process.on('SIGTERM', stop);
+
+    // Soft-fail unhandled rejections so transient tool errors don't crash
+    // the whole agent. Hard-fail uncaught exceptions — those usually mean
+    // genuine bugs we'd rather surface immediately.
+    let unhandled = 0;
+    process.on('unhandledRejection', (err) => {
+      unhandled += 1;
+      log.error(`unhandled rejection: ${err && err.message ? err.message : err}`);
+      if (unhandled >= 10) {
+        log.error('too many unhandled rejections — shutting down');
+        stop();
+      }
+    });
+    process.on('uncaughtException', (err) => {
+      log.error(`uncaught exception: ${err.message}`);
+      stop();
+    });
+
+    try {
+      await agent.start();
+    } catch (err) {
+      log.error(`agent failed to start: ${err.message}`);
+      process.exit(1);
+    }
+  });
+
+program.parseAsync(process.argv).catch((err) => {
+  console.error(err && err.message ? err.message : err);
+  process.exit(1);
+});
