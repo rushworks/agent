@@ -123,16 +123,40 @@ CI runs and ephemeral `npx` invocations.
 The server tells the agent its role on `/api/agent/whoami`. The runtime
 loads only the tools that role is allowed to use.
 
-| Tool prefix | Analyst | Developer |
-|-------------|---------|-----------|
-| `portal_*`  | ✓       | ✓         |
-| `system_list_dir`, `system_read_file`, `system_glob`, `system_grep` | ✓ | ✓ |
-| `system_write_file`, `system_edit_file`, `system_bash` | ✗ | ✓ |
-| `github_*`  | ✗       | ✓         |
+| Tool prefix | Analyst | Developer | Devops |
+|-------------|---------|-----------|--------|
+| `portal_*`  | ✓       | ✓         | partial (see below) |
+| `system_list_dir`, `system_read_file`, `system_glob`, `system_grep` | ✓ | ✓ | ✗ |
+| `system_write_file`, `system_edit_file`, `system_bash` | ✗ | ✓ | ✗ |
+| `repo_*`    | ✓ (read) | ✓ (read) | ✗ |
+| `github_*`  | ✗       | ✓         | ✗ |
+| `system_logs`, `db_query` | ✗ | ✗ | ✓ |
 
 The portal *also* enforces this on every request, so even a hand-crafted
 HTTP call from an analyst will get a 403 trying to mint a git token or
 open a PR.
+
+### Devops role
+
+Devops agents read logs + query the customer's DB on the host they run
+on, then file Backlog tasks describing what they found. They cannot edit
+code, cannot assign tasks, cannot mark tasks Completed.
+
+**Required setup:** the PM configures per-project permissions in the
+portal (project Team tab → click into a devops agent → set the log
+allowlist and DB connection). The agent fetches that config at task /
+mention time via `/api/agent/projects/{id}/briefing` and refuses any
+log path or DB call that isn't allowlisted.
+
+**Devops is BYOA only.** A devops agent has to run on the same machine
+as your app to read logs and reach your DB. Managed agents (when shipped)
+run on Rushworks infrastructure and can't do either.
+
+**Optional dependency.** `pg` ships as an optional dependency of this
+package. The `db_query` tool requires it; if you don't run devops
+agents, the missing optional install is harmless. If your devops agent
+needs MySQL or other databases, that's a v2 follow-up — Postgres only
+for now.
 
 ## How it stays in sync
 
