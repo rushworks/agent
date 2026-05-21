@@ -78,11 +78,40 @@ directives:
 into the process, so the agent gets its config without the service user needing
 to read the secrets file directly.
 
-## What this does NOT cover
+### 4. Network egress allowlist (per-uid)
+The agent runs on a box full of other services, so the firewall rules are scoped
+to the **agent's uid only** (`iptables -m owner --uid-owner`) — never box-wide.
+They can't affect your apps, CI runners, or anything else.
 
-* **Network egress allowlisting.** Restricting the agent to only the portal +
-  model provider is a separate step (it requires per-uid firewall rules and
-  handling CDN IP rotation). Done in the companion firewall script / follow-up.
+The agent user may reach: loopback (covers DNS via `127.0.0.53` and a local DB on
+`127.0.0.1`), established/related return traffic, the configured DNS resolvers on
+`:53`, and `:443` to the **portal host** (parsed from the workspace `.env`) and
+the **model provider** (`api.anthropic.com`). Everything else is dropped. IPv6
+egress is dropped except loopback/established (no v6 hosts are allowlisted), which
+forces the agent onto the filtered v4 path. Add extra destinations with
+`EGRESS_EXTRA_HOSTS="host1 host2" sudo -E ./harden-host.sh <name>`.
+
+Because allowlisting is by **IP** (iptables can't match hostnames) and providers
+sit behind **CDNs whose IPs rotate**, the script installs a oneshot that applies
+the rules at boot (before the agent starts) plus a **timer that re-resolves the
+allowlist every 15 minutes**. Refresh manually any time with
+`systemctl restart rushworks-egress-<name>`. Rules are intentionally not saved to
+disk — they are rebuilt from current DNS on every apply.
+
+The rules are **fail-open**: the agent unit `Wants=` (not `Requires=`) the egress
+oneshot, so a firewall hiccup won't take the agent down — but the agent could
+then run un-restricted. For a fail-closed posture, change `Wants=`→`Requires=`
+and add `BindsTo=` in the generated agent unit.
+
+**Roll back the egress rules:**
+```bash
+UID=$(id -u <name>)
+iptables  -D OUTPUT -m owner --uid-owner "$UID" -j RW_EG4_"$UID"; iptables  -F RW_EG4_"$UID"; iptables  -X RW_EG4_"$UID"
+ip6tables -D OUTPUT -m owner --uid-owner "$UID" -j RW_EG6_"$UID"; ip6tables -F RW_EG6_"$UID"; ip6tables -X RW_EG6_"$UID"
+systemctl disable --now rushworks-egress-<name>.timer rushworks-egress-<name>.service
+```
+
+## What this does NOT cover
 * **Mandatory Access Control.** No SELinux or AppArmor profile is shipped. The
   systemd sandbox is discretionary + namespace-based; an MAC profile would add
   defense in depth. Write one for `rushworks-agent` if your environment requires it.
