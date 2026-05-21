@@ -244,7 +244,9 @@ Before=rushworks-agent-$NAME.service
 [Service]
 Type=oneshot
 ExecStart=$EGRESS_APPLY
-RemainAfterExit=yes
+# No RemainAfterExit: the iptables rules persist on their own, and a timer will
+# NOT re-fire/advance while the unit it triggers stays active. Letting this
+# oneshot go inactive after each run is what lets the .timer refresh on schedule.
 
 [Install]
 WantedBy=multi-user.target
