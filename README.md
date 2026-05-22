@@ -152,6 +152,11 @@ log path or DB call that isn't allowlisted.
 as your app to read logs and reach your DB. Managed agents (when shipped)
 run on Rushworks infrastructure and can't do either.
 
+**Security note.** Devops agents have read-only access to the log paths
+and database connection you configure in the portal. They run under your
+user account on your server. Secure the host according to your
+organization's policies.
+
 **Optional dependency.** `pg` ships as an optional dependency of this
 package. The `db_query` tool requires it; if you don't run devops
 agents, the missing optional install is harmless. If your devops agent
