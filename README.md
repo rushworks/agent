@@ -125,12 +125,15 @@ loads only the tools that role is allowed to use.
 
 | Tool prefix | Analyst | Developer | Devops |
 |-------------|---------|-----------|--------|
-| `portal_*`  | ✓       | ✓         | partial (see below) |
-| `system_list_dir`, `system_read_file`, `system_glob`, `system_grep` | ✓ | ✓ | ✗ |
-| `system_write_file`, `system_edit_file`, `system_bash` | ✗ | ✓ | ✗ |
-| `repo_*`    | ✓ (read) | ✓ (read) | ✗ |
+| `portal_*`  | ✓       | ✓         | ✓      |
+| `system_list_dir`, `system_read_file`, `system_glob`, `system_grep` | ✓ | ✓ | ✓ (absolute paths, deny-list gated) |
+| `system_write_file`, `system_edit_file` | ✗ | ✓ | PM toggle (`file_write`) |
+| `system_bash` | ✗ | ✓ | PM toggle (`shell_access`) |
+| `repo_get`  | ✓       | ✓         | ✓      |
+| `repo_search`, `repo_log` | ✓ | ✓ | ✗ |
 | `github_*`  | ✗       | ✓         | ✗ |
-| `system_logs`, `db_query` | ✗ | ✗ | ✓ |
+| `system_logs` | ✗ | ✗ | ✓ |
+| `db_query` | ✗ | ✗ | ✓ (read-only default; PM toggle `db_write` enables writes) |
 
 The portal *also* enforces this on every request, so even a hand-crafted
 HTTP call from an analyst will get a 403 trying to mint a git token or
@@ -138,29 +141,50 @@ open a PR.
 
 ### Devops role
 
-Devops agents read logs + query the customer's DB on the host they run
-on, then file Backlog tasks describing what they found. They cannot edit
-code, cannot assign tasks, cannot mark tasks Completed.
+Devops agents have blanket read-only access to the host filesystem, the
+project's GitHub repo, the task board, and (optionally) the customer's
+database. They file Backlog tasks describing what they find. They cannot
+assign tasks, cannot mark tasks Completed.
 
-**Required setup:** the PM configures per-project permissions in the
-portal (project Team tab → click into a devops agent → set the log
-allowlist and DB connection). The agent fetches that config at task /
-mention time via `/api/agent/projects/{id}/briefing` and refuses any
-log path or DB call that isn't allowlisted.
+**Filesystem access.** Devops agents use the same read tools as
+analyst/developer agents (`system_list_dir`, `system_read_file`,
+`system_glob`, `system_grep`) but operate on absolute paths instead of
+a working directory. A hardcoded deny-list blocks sensitive files
+(.env, .ssh, *.key, *.pem, shadow, sudoers, etc.) regardless of
+request. The `system_logs` tool provides `tail` and `grep` modes for
+large log files beyond the 200KB read limit.
+
+**Database access.** The PM configures a connection string per-project
+via the Team tab. If set, `db_query` runs SELECT-only queries by
+default (enforced via `SET TRANSACTION READ ONLY`).
+
+**Write permissions.** The PM can enable three optional write
+capabilities per-project via the Team tab:
+
+| Toggle | Tools unlocked | Notes |
+|--------|---------------|-------|
+| `file_write` | `system_write_file`, `system_edit_file` | Absolute paths; deny-list still blocks writes to sensitive files |
+| `shell_access` | `system_bash` | Full shell under the host user account; requires `cwd` param |
+| `db_write` | `db_query` (removes READ ONLY) | INSERT/UPDATE/DELETE/DDL allowed |
+
+All three default to off. The tools are visible in the agent's tool
+list regardless, but they refuse execution unless the PM has enabled
+the corresponding toggle.
 
 **Devops is BYOA only.** A devops agent has to run on the same machine
 as your app to read logs and reach your DB. Managed agents (when shipped)
 run on Rushworks infrastructure and can't do either.
 
-**Security note.** Devops agents have read-only access to the log paths
-and database connection you configure in the portal. They run under your
-user account on your server. Secure the host according to your
-organization's policies.
+**Security note.** Devops agents have read-only access to the entire
+host filesystem (minus the deny-list) and any database connection you
+configure. Write permissions are off by default and must be explicitly
+enabled per-project by the PM. They run under your user account on
+your server. Secure the host according to your organization's policies.
 
 **Optional dependency.** `pg` ships as an optional dependency of this
 package. The `db_query` tool requires it; if you don't run devops
 agents, the missing optional install is harmless. If your devops agent
-needs MySQL or other databases, that's a v2 follow-up — Postgres only
+needs MySQL or other databases, that's a v2 follow-up: Postgres only
 for now.
 
 ## How it stays in sync
