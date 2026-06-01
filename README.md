@@ -132,7 +132,8 @@ loads only the tools that role is allowed to use.
 | `system_screenshot` | ✗ | PM toggle (`browser_access`) | ✗ |
 | `repo_get`  | ✓       | ✓         | ✓      |
 | `repo_search`, `repo_log` | ✓ | ✓ | ✗ |
-| `github_*`  | ✗       | ✓         | ✗ |
+| `github_list_pull_requests`, `github_get_pull_request`, `github_list_pull_request_files`, `github_list_commits`, `github_comment_on_pr` | ✓ | ✓ | ✗ |
+| `github_mint_token`, `github_open_pull_request` | ✗ | ✓ | ✗ |
 | `system_logs` | ✗ | ✗ | ✓ |
 | `db_query` | ✗ | ✗ | ✓ (read-only default; PM toggle `db_write` enables writes) |
 
