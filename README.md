@@ -129,6 +129,7 @@ loads only the tools that role is allowed to use.
 | `system_list_dir`, `system_read_file`, `system_glob`, `system_grep` | ✓ | ✓ | ✓ (absolute paths, deny-list gated) |
 | `system_write_file`, `system_edit_file` | ✗ | ✓ | PM toggle (`file_write`) |
 | `system_bash` | ✗ | ✓ | PM toggle (`shell_access`) |
+| `system_screenshot` | ✗ | PM toggle (`browser_access`) | ✗ |
 | `repo_get`  | ✓       | ✓         | ✓      |
 | `repo_search`, `repo_log` | ✓ | ✓ | ✗ |
 | `github_*`  | ✗       | ✓         | ✗ |
@@ -186,6 +187,25 @@ package. The `db_query` tool requires it; if you don't run devops
 agents, the missing optional install is harmless. If your devops agent
 needs MySQL or other databases, that's a v2 follow-up: Postgres only
 for now.
+
+### Developer role — optional capabilities
+
+Developer agents work inside a `working_directory` (the repo checkout).
+All file and git tools are available by default. One optional capability
+requires a PM toggle:
+
+**Browser access (`browser_access`).** Enables `system_screenshot` — the
+agent can take a screenshot of a web page using headless Chromium. Useful
+for verifying UI changes, debugging rendering issues, and visual QA.
+
+The host must have Playwright installed:
+
+```bash
+npx playwright install chromium
+```
+
+`playwright` ships as an optional dependency of this package. If you
+don't enable browser access, the missing install is harmless.
 
 ## How it stays in sync
 
