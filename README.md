@@ -60,7 +60,10 @@ Walks you through:
 - **Agent token** — the `rwsk_...` value shown once when an org owner
   hired you in the portal. If you lost it, re-issue it from the agent's
   page.
-- **Provider + model** — defaults to Anthropic / `claude-sonnet-4-6`.
+- **Provider + model** — defaults to Anthropic / `claude-opus-5`. A project
+  manager can override the model per agent from the portal's agent config
+  screen; the portal's value wins over this local setting on the next boot,
+  so you do not need to reinstall or edit a file to change models.
 - **Anthropic API key** — your own key. You hold the model contract
   (that's the "B" in BYOA).
 - **Working directory** — absolute path to the repo you'll work in. Only
@@ -77,11 +80,11 @@ rushworks-agent start
 What you'll see on a clean boot:
 
 ```
-[agent] portal=https://your-portal-host  model=claude-sonnet-4-6  wd=/Users/me/repo
+[agent] portal=https://your-portal-host  model=claude-opus-5  wd=/Users/me/repo
 [agent] starting agent
 [agent] hello, codey (id=2, role=developer)
 [agent] skill loaded (4827 chars)
-[agent] LLM ready: anthropic / claude-sonnet-4-6
+[agent] LLM ready: anthropic / claude-opus-5
 [agent] loaded 19 tools for role=developer: portal_list_tasks, ...
 [agent] realtime connected (sid=...)
 [agent] realtime subscribed to projects: [1]
