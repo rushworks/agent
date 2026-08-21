@@ -11,18 +11,72 @@ SKILL, your own framework, etc.), you can still connect via the documented
 
 ## What it does
 
-- Authenticates to your Rushworks portal with the bearer token you got
-  when an org owner added you in the **Agents** tab.
-- Holds a Socket.IO connection open to the portal so it reacts to task
-  assignments and `needs_input` resolutions in real time.
-- Falls back to a periodic catchup poll if the WebSocket drops.
-- When a task is assigned (or already In Progress on restart), it spins
-  up a tool-use loop: reads the task, fetches the project briefing,
-  loads `CLAUDE.md` + your shared Claude Code memory from the working
-  directory, and works the task with role-appropriate tools.
-- Posts a comment with its summary, then moves the task to **Ready** for
-  human acceptance. (It is never allowed to mark a task **Completed** —
-  that is the human acceptance moment.)
+- Authenticates to your Rushworks portal with the bearer token an org owner
+  issued you in the **Agents** tab.
+- Polls for **work orders assigned to it**, claims one, works it in a
+  tool-use loop, opens a pull request, and hands off for review.
+- Narrates what it is doing into the project's Workspace, so the humans on
+  the project can follow along without asking.
+- Holds a Socket.IO connection open for messages and @-mentions, and falls
+  back to polling when that connection drops.
+
+It never decides *what* work exists and it never marks work complete. Both
+of those are human decisions, enforced by the portal (see **How work reaches
+you** below).
+
+This is the default BYOA implementation, not the only path. If you already
+have an agent setup you like (Claude Code with a custom skill, your own
+framework), you can talk to the documented `/api/agent/*` REST API directly
+and ignore this CLI.
+
+## How work reaches you
+
+Work is a **work order**: a branch-backed unit of work belonging to a wish.
+The portal only offers you one once it has passed three gates:
+
+| Gate | Meaning | Who clears it |
+|---|---|---|
+| **Sanctioned** | a human blessed this as real work | project manager / owner |
+| **Activated** | released for pickup, not still being drafted | project manager / analyst |
+| **Assigned** | routed specifically to you | project manager / analyst |
+
+A work order missing any of the three is invisible to your queue. In
+particular, **pushing a branch does not create work for yourself**: the
+portal auto-creates a work order from an unrecognised branch but marks it
+unsanctioned, so it waits for a human.
+
+The loop, once one is assigned:
+
+1. **Claim** it — a soft lease. Your claim is refreshed while you work; if
+   the process dies, the portal releases it after a period of inactivity so
+   the work order is not stuck forever.
+2. **Read** the work order and the project briefing, plus `CLAUDE.md` and
+   any shared memory in your working directory.
+3. **Work** it on its branch with role-appropriate tools.
+4. **Open a pull request.** That is the completion signal.
+5. **Sign off** with a summary in the project conversation, and release the
+   claim.
+
+**You never set status.** Status is derived from the repository: commits move
+a work order to In Progress, a PR to In Review, a merge to production to
+Done. That is deliberate — the repo is the source of truth, not a field
+somebody remembered to update.
+
+## Which model it uses
+
+Resolved at boot, widest to narrowest:
+
+```
+portal agent config   ->   RW_MODEL env / local config   ->   built-in default
+```
+
+If a project manager sets a model on your agent's config screen in the
+portal, that wins on your next boot — no reinstall, no file to edit here.
+The built-in default is `claude-opus-5`. When the portal's value differs
+from your local one, the runtime logs which it chose.
+
+Under BYOA the model runs on **your** Anthropic API key, so the cost and the
+choice are both yours.
 
 ## Install
 
@@ -91,8 +145,9 @@ What you'll see on a clean boot:
 [agent] agent ready — waiting for events
 ```
 
-Stop with `Ctrl-C`. The agent will exit cleanly; in-progress task state
-is left on the portal so the next process picks up where you left off.
+Stop with `Ctrl-C`. The agent exits cleanly. Any claim it held is left on
+the portal and released after a period without a heartbeat, so the work
+order returns to the queue rather than being stuck.
 
 ## Useful commands
 
@@ -150,9 +205,10 @@ open a PR.
 ### Devops role
 
 Devops agents have blanket read-only access to the host filesystem, the
-project's GitHub repo, the task board, and (optionally) the customer's
-database. They file Backlog tasks describing what they find. They cannot
-assign tasks, cannot mark tasks Completed.
+project's GitHub repo, the backlog, and (optionally) the customer's
+database. They report what they find in the project conversation. They
+cannot create work orders, cannot assign work, and cannot mark anything
+complete.
 
 **Filesystem access.** Devops agents use the same read tools as
 analyst/developer agents (`system_list_dir`, `system_read_file`,
@@ -216,15 +272,20 @@ don't enable browser access, the missing install is harmless.
 
 ## How it stays in sync
 
-- **Primary**: a Socket.IO connection to the portal. On boot the agent
-  auto-joins every `project:<id>` room it's a member of, plus its
-  personal `agent:<id>` room. It receives `task:event`, `message:event`,
-  and `notification:event` pushes.
-- **Fallback**: a polling loop every `poll_interval_seconds` (default 30)
-  that calls `GET /api/agent/tasks?status=Queued`. Catches anything the
-  WS missed during a disconnect.
-- **Boot catchup**: on start, the agent reads all of its `In Progress`
-  tasks (in case it died mid-task last run) and works them first.
+- **Work discovery is polling.** Every `poll_interval_seconds` (default 30)
+  the runtime asks `GET /api/agent/updates` for work orders assigned to it
+  that are activated and sanctioned, and works them up to
+  `max_concurrent_tasks`. On boot it does the same pass immediately, so a
+  restart picks up whatever was already assigned.
+- **Conversation is realtime.** A Socket.IO connection joins every
+  `project:<id>` room the agent belongs to plus its own `agent:<id>` room,
+  and receives `message:event` and `notification:event` pushes. This is how
+  @-mentions reach you without waiting for a poll.
+- **The socket is not required.** If it drops, the poll keeps work moving;
+  only the responsiveness of chat degrades.
+- **Your credentials can be revoked from the portal.** If an owner revokes
+  or reissues your token, the portal drops your live connection immediately
+  and the next request fails with a 401.
 
 ## Filesystem perimeter
 

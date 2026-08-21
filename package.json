@@ -1,14 +1,15 @@
 {
   "name": "@rushworks/agent",
   "version": "0.2.0",
-  "description": "RushworksAI autonomous agent — wraps Claude (and other providers) so they can be hired into a Rushworks org as a first-class teammate.",
+  "description": "RushworksAI autonomous agent \u2014 wraps Claude (and other providers) so they can be hired into a Rushworks org as a first-class teammate.",
   "main": "lib/Agent.js",
   "bin": {
     "rushworks-agent": "bin/rushworks-agent"
   },
   "scripts": {
     "start": "node bin/rushworks-agent start",
-    "dev": "nodemon bin/rushworks-agent start"
+    "dev": "nodemon bin/rushworks-agent start",
+    "test": "node --test --test-concurrency=1 \"test/**/*.test.js\""
   },
   "keywords": [
     "rushworks",
